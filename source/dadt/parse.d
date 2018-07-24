@@ -1,10 +1,11 @@
 module dadt.parse;
 import pegged.grammar;
+import std.algorithm;
 import std.format;
 import std.string;
 import std.stdio;
 import std.array;
-import std.algorithm;
+import std.ascii;
 
 mixin(grammar(`
 DADT:
@@ -14,10 +15,10 @@ DADT:
 
   TypeName <~ !Keyword [A-Z_] [a-zA-Z0-9_]*
   
-  Field < FieldWithArgs / FieldOfArray / FieldName
+  Field < FieldOfArray / FieldWithArgs / FieldName
   FieldArgs < "()" / :"(" Field ("," Field)* :")"
   FieldWithArgs < FieldName "!" FieldArgs
-  FieldOfArray < Field ArrayBracket+
+  FieldOfArray < (FieldWithArgs / FieldName) ArrayBracket+
   FieldName <~ !Keyword [a-zA-Z_] [a-zA-Z0-9_]*
 
   ArrayBracket < UnsizedBracket / SizedBracket
@@ -150,16 +151,16 @@ class UnsizedBracket : ArrayBracket {
 }
 
 class FieldOfArray : Field {
-  FieldName fieldName;
+  Field field;
   ArrayBracket bracket;
 
-  this(FieldName fieldName, ArrayBracket bracket) {
-    this.fieldName = fieldName;
+  this(Field field, ArrayBracket bracket) {
+    this.field = field;
     this.bracket = bracket;
   }
 
   override const string typeString() {
-    string baseType = fieldName.typeString;
+    string baseType = field.typeString;
 
     if (this.bracket.isSized) {
       SizedBracket sb = cast(SizedBracket)bracket;
@@ -212,7 +213,7 @@ class Constructor : ASTElement {
 }
 
 ASTElement buildAST(ParseTree p) {
-  writeln("p.name : ", p.name);
+  //writeln("p.name : ", p.name);
   final switch (p.name) {
   case "DADT":
     auto e = p.children[0];
@@ -278,9 +279,8 @@ ASTElement buildAST(ParseTree p) {
 
     return new FieldArgs(fields);
   case "DADT.FieldOfArray":
-    writeln(p.name, " <p.children> : ", p.children);
-    FieldName fieldName = cast(FieldName)buildAST(p.children[0]);
-    if (fieldName is null) {
+    Field field = cast(Field)buildAST(p.children[0]);
+    if (field is null) {
       throw new Error("Error in %s!".format(p.name));
     }
 
@@ -289,7 +289,7 @@ ASTElement buildAST(ParseTree p) {
       throw new Error("Error in %s!".format(p.name));
     }
 
-    return new FieldOfArray(fieldName, ab);
+    return new FieldOfArray(field, ab);
   case "DADT.ArrayBracket":
     auto e = p.children[0];
     return buildAST(e);
@@ -365,11 +365,13 @@ string genCode(const TypeDeclare td) {
   const string[] interface_args = td.baseConstructor.parameterList.parameters.map!(
       (const TypeName tn) => tn.name).array;
   string args_str;
+  string interface_args_str;
   if (interface_args.length) {
-    args_str = "!(" ~ interface_args.join(", ") ~ ")";
+    interface_args_str = "(" ~ interface_args.join(", ") ~ ")";
+    args_str = "!" ~ interface_args_str;
   }
 
-  code ~= "interface " ~ interface_name ~ args_str ~ "{}\n";
+  code ~= "interface " ~ interface_name ~ interface_args_str ~ "{}\n";
 
   foreach (constructor; td.constructorList.constructors) {
     string[] field_names;
@@ -400,13 +402,108 @@ string genCode(const TypeDeclare td) {
     this_code = `this(%s) {
   %s
 }`.format(this_argument, initialize_list);
+
     code ~= "\n" ~ `class %s%s : %s%s {
   %s
 
   %s
 }`.format(constructor.typeName.name,
-        args_str, interface_name, args_str, field_code, this_code);
+        interface_args_str, interface_name, args_str, field_code, this_code);
+
+    string helper_code;
+    string helper_returnType = constructor.typeName.name ~ args_str;
+    string helper_name = constructor.typeName.name.toLower;
+    string helper_typeParameters;
+
+    if (interface_args.length) {
+      helper_typeParameters = "(" ~ interface_args.join(", ") ~ ")";
+    }
+
+    string[] helper_arguments;
+    string[] helper_variables;
+
+    foreach (i, field; constructor.fields) {
+      helper_arguments ~= "%s _%d".format(field.typeString(), i);
+      helper_variables ~= "_%d".format(i);
+    }
+
+    helper_code = `
+%s %s%s(%s) {
+  return new %s(%s);
+}`.format(helper_returnType, helper_name, helper_typeParameters,
+        helper_arguments.join(", "), helper_returnType, helper_variables.join(", "));
+
+    code ~= helper_code;
   }
+
+  string match_returnType = "_RETURN_TYPE_OF_MATCH_WITH_%s".format(interface_name);
+  string match_header = "%s matchWith%s(%s, %s choices...)(%s%s arg) {".format(
+      match_returnType, interface_name, match_returnType,
+      interface_args.join(", ") ~ (interface_args.length > 0 ? "," : ""), interface_name, args_str);
+
+  string[] match_static_routers;
+
+  foreach (constructor; td.constructorList.constructors) {
+    string type_signature = constructor.typeName.name ~ args_str;
+    string[] field_names;
+    foreach (i, fieldType; constructor.fields) {
+      string field_name = "x._%d".format(i);
+      field_names ~= field_name;
+    }
+
+    match_static_routers ~= `static if (is(%s == params[0])) {`.format(type_signature) ~ `
+        %s x = cast(%s)arg;`.format(type_signature,
+        type_signature) ~ `
+        static if (is(ReturnType!(choice) == %s)) {
+          static if (is(%s == void)) {`.format(match_returnType,
+        match_returnType) ~ `
+            choice(x);
+          }
+          else {
+            return choice(x);
+          }
+        }
+        else {
+          return choice(x)` ~ (field_names.length > 0
+        ? `(` ~ field_names.join(", ") ~ `)` : "") ~ ` ;
+        }
+    }`;
+  }
+
+  string match_code = `
+  %s
+  import std.traits;
+  %s delegate() otherwise = null;`.format(match_header,
+      match_returnType) ~ `
+
+  foreach (choice; choices) {
+    alias params = Parameters!choice;
+    static if (params.length < 1) {
+      otherwise = () => choice();
+    }
+
+    if (cast(params[0])(arg) !is null) {
+    ` ~ match_static_routers.join("\n") ~ `
+    }
+  }
+
+  if (otherwise !is null) {
+    static if (is(%s == void)) {
+      otherwise();
+      return;
+    }
+    else {
+      return otherwise();
+    }
+  }
+
+  static if (!is(%s == void)) {
+    return null;
+  }
+}`.format(match_returnType,
+      match_returnType);
+
+  code ~= match_code;
 
   return code;
 }
