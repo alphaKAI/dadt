@@ -1,4 +1,6 @@
-module source.option;
+module dadt.option;
+import std.algorithm, std.traits;
+
 /*
 	type Option(T) =
 		| Some of T

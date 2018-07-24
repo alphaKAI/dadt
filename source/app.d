@@ -1,6 +1,5 @@
 import std.stdio;
-import std.traits;
-import std.algorithm;
+import dadt.parse;
 
 void main() {
 	/*
@@ -12,7 +11,6 @@ void main() {
 	ret.matchWithOption!(void, int, (Some!int _) => (int x) => writeln("x is ", x),
 			(None!int _) => writeln("None!"));
 */
-	import parse;
 
 	enum code = `
 type Option(T) =

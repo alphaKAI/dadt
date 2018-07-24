@@ -1,4 +1,4 @@
-module parse;
+module dadt.parse;
 import pegged.grammar;
 import std.format;
 import std.string;
