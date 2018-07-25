@@ -110,8 +110,7 @@ class FieldWithArgs : Field {
       argsStr = "!(" ~ fields.join(", ") ~ ")";
 
       return baseType ~ argsStr;
-    }
-    else {
+    } else {
       return baseType;
     }
   }
@@ -165,8 +164,7 @@ class FieldOfArray : Field {
     if (this.bracket.isSized) {
       SizedBracket sb = cast(SizedBracket)bracket;
       return baseType ~ "[%s]".format(sb.size.size);
-    }
-    else {
+    } else {
       return baseType ~ "[]";
     }
   }

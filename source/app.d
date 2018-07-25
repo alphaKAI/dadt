@@ -13,8 +13,7 @@ Option!R bind(T, R)(Option!T arg, Option!(R) function(T) proc) {
 	if ((cast(Some!T)arg) !is null) {
 		T val = (cast(Some!T)arg)._0;
 		return proc(val);
-	}
-	else {
+	} else {
 		return none!(R);
 	}
 }
@@ -38,7 +37,7 @@ void testForOption() {
   (Some!int _) => (int x) => writeln("x is ", x),
       (None!int _) => writeln("None!"));
 
-  opt.matchWithOption!(Option!int, int
+  opt.matchWithOption!(Option!int, int,
       (Some!int _) => (int x) => some(x * x),
       (None!int _) => none!(int))
     .bind!(int, int)((int x) { writeln("x : ", x); return some(x); });
@@ -60,8 +59,7 @@ string indent(size_t n) {
 	foreach (i; 0 .. n) {
 		if (i % 2) {
 			ret ~= "|   ";
-		}
-		else {
+		} else {
 			ret ~= "||  ";
 		}
 	}
@@ -72,13 +70,16 @@ string toString(T)(Tree!T tree, size_t depth = 0) {
 	import std.string;
 
 	string indent_str = indent(depth);
-	return tree.matchWithTree!(string, T, (Node!(int) _) => (Tree!int l,
-			Tree!int r) => `
+	// dfmt off
+	return tree.matchWithTree!(string, T,
+			(Node!(int) _) => (Tree!int l, Tree!int r) => `
 %s|---<left>%s
 %s|
-%s|---<right>%s`.format(indent_str, toString!(T)(l,
-			depth + 1), indent_str, indent_str, toString!(T)(r, depth + 1)),
+%s|---<right>%s`.format(indent_str, toString!(T)(l, depth + 1),
+												indent_str,
+												indent_str, toString!(T)(r, depth + 1)),
 			(Leaf!(int) _) => (int v) => "%s".format(v));
+	// dfmt on
 }
 
 void testForBinaryTree() {
@@ -101,5 +102,4 @@ type Option(T) =
 	writeln("compile to ↓");
 	TypeDeclare td = cast(TypeDeclare)DADT(code).buildAST;
 	(genCode(td)).writeln;
-
 }
