@@ -1,5 +1,6 @@
+module dadt.example;
 import std.stdio;
-import dadt.parse;
+import dadt.parser;
 
 enum code = `
 type Option(T) =

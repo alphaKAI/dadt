@@ -1,0 +1,14 @@
+{
+	"name": "example",
+	"authors": [
+		"Akihiro Shoji"
+	],
+	"description": "Example of dadt",
+	"copyright": "Copyright (C) 2018, Akihiro Shoji",
+	"license": "MIT",
+	"dependencies": {
+		"dadt": {
+			"path": "../"
+		}
+	}
+}
