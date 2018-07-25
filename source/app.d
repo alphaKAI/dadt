@@ -3,8 +3,8 @@ import dadt.parse;
 
 enum code = `
 type Option(T) =
-	| Some of T
-	| None
+  | Some of T
+  | None
 `;
 
 mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
@@ -22,24 +22,36 @@ Option!R bind(T, R)(Option!T arg, Option!(R) function(T) proc) {
 void testForOption() {
 	Option!int opt = some(100);
 
-	Option!int ret = matchWithOption!(Option!int, int,
-			(Some!int _) => (int x) => some(x * x), (None!int _) => none!(int))(opt);
+	// dfmt off
+  opt.matchWithOption!(Option!int, int,
+      (Some!int _) => (int x) => cast(Option!int)(x % 2 == 0 ? some(x) : none!(int)),
+      (None!int _) => none!(int))
+    .bind!(int, string)((int x) => some("x % 2 == 0!!"))
+    .matchWithOption!(void, string,
+      (Some!string _) => (string x) => writeln(x));
 
-	ret.matchWithOption!(void, int, (Some!int _) => (int x) => writeln("x is ", x),
-			(None!int _) => writeln("None!"));
+  Option!int ret = matchWithOption!(Option!int, int,
+      (Some!int _) => (int x) => some(x * x),
+      (None!int _) => none!(int))(opt);
 
-	opt.matchWithOption!(Option!int, int, (Some!int _) => (int x) => some(x * x),
-			(None!int _) => none!(int))
-		.bind!(int, int)((int x) { writeln("x : ", x); return some(x); });
+  ret.matchWithOption!(void, int,
+  (Some!int _) => (int x) => writeln("x is ", x),
+      (None!int _) => writeln("None!"));
 
-	//mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
+  opt.matchWithOption!(Option!int, int
+      (Some!int _) => (int x) => some(x * x),
+      (None!int _) => none!(int))
+    .bind!(int, int)((int x) { writeln("x : ", x); return some(x); });
+
+  //mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
+  // dfmt on
 }
 
 enum code1 = `
-		type Tree(T) =
-			| Node of Tree!(T) * Tree!(T)
-			| Leaf of T
-	`;
+type Tree(T) =
+  | Node of Tree!(T) * Tree!(T)
+  | Leaf of T
+`;
 
 mixin(genCode(cast(TypeDeclare)DADT(code1).buildAST));
 
@@ -82,11 +94,12 @@ void main() {
 void test() {
 	enum code = `
 type Option(T) =
-	| Some of T
-	| None
+  | Some of T
+  | None
 `;
 	writeln(code);
 	writeln("compile to ↓");
 	TypeDeclare td = cast(TypeDeclare)DADT(code).buildAST;
 	(genCode(td)).writeln;
+
 }
