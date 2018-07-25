@@ -453,23 +453,24 @@ string genCode(const TypeDeclare td) {
         %s x = cast(%s)arg;`.format(type_signature,
         type_signature) ~ `
         static if (is(ReturnType!(choice) == %s)) {
-          static if (is(%s == void)) {`.format(match_returnType,
-        match_returnType) ~ `
+          static if (is(%s == void)) {`.format(match_returnType, match_returnType) ~ `
             choice(x);
-          }
-          else {
+          } else {
             return choice(x);
           }
+        } else {
+          static if (isCallable!(ReturnType!(choice))) {
+            return cast(%s)choice(x)`.format(
+        match_returnType) ~ (field_names.length > 0
+        ? `(` ~ field_names.join(", ") ~ `)` : "()") ~ ` ;
+          } else {
+            return cast(%s)choice(x); 
+          }
         }
-        else {
-          return choice(x)` ~ (field_names.length > 0
-        ? `(` ~ field_names.join(", ") ~ `)` : "") ~ ` ;
-        }
-    }`;
+    }`.format(match_returnType);
   }
 
-  string match_code = `
-  %s
+  string match_code = `%s
   import std.traits;
   %s delegate() otherwise = null;`.format(match_header,
       match_returnType) ~ `
@@ -489,8 +490,7 @@ string genCode(const TypeDeclare td) {
     static if (is(%s == void)) {
       otherwise();
       return;
-    }
-    else {
+    } else {
       return otherwise();
     }
   }
