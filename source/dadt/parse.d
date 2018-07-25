@@ -254,10 +254,11 @@ class Deriving : ASTElement {
 }
 
 ASTElement buildAST(ParseTree p) {
-
+  /*
   if (!__ctfe) {
     writeln("p.name : ", p.name);
   }
+  */
 
   final switch (p.name) {
   case "DADT":
