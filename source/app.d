@@ -9,12 +9,52 @@ type Option(T) =
 
 mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
 
-Option!R bind(T, R)(Option!T arg, Option!(R) function(T) proc) {
+auto bind(T, U)(Option!(T) arg, U function(T) proc) {
+	import std.traits;
+
+	//writeln("arg : ", arg);
+	//writeln("proc : ", typeid(proc));
+
+	static if (is(U == void)) {
+		alias R = void;
+	} else static if (__traits(isSame, TemplateOf!(U), Option)
+			|| __traits(isSame, TemplateOf!(U), Some) || __traits(isSame, TemplateOf!(U), None)) {
+		alias R = U;
+	} else {
+		alias R = Option!U;
+	}
+
+	//writeln("R : ", typeid(R));
+	//writeln("U : ", typeid(U));
+
 	if ((cast(Some!T)arg) !is null) {
 		T val = (cast(Some!T)arg)._0;
-		return proc(val);
+
+		static if (is(R == void)) {
+			proc(val);
+			return;
+		}
+		static if (is(R == U)) {
+			static if (__traits(isSame, TemplateOf!(U), Option) || __traits(isSame,
+					TemplateOf!(U), Some) || __traits(isSame, TemplateOf!(U), None)) {
+				return proc(val);
+			}
+		} else {
+			return some(proc(val));
+		}
 	} else {
-		return none!(R);
+		static if (is(R == void)) {
+			return;
+		}
+		static if (is(R == U)) {
+			return cast(Option!(TemplateArgsOf!U))none!(TemplateArgsOf!U);
+		} else {
+			static if (is(R == None!U)) {
+				return none!U;
+			} else {
+				throw new Error("<2>Error in bind! <incompatible type was given>");
+			}
+		}
 	}
 }
 
@@ -23,9 +63,9 @@ void testForOption() {
 
 	// dfmt off
   opt.matchWithOption!(Option!int, int,
-      (Some!int _) => (int x) => cast(Option!int)(x % 2 == 0 ? some(x) : none!(int)),
+      (Some!int _) => (int x) => x % 2 == 0 ? some(x) : none!(int),
       (None!int _) => none!(int))
-    .bind!(int, string)((int x) => some("x % 2 == 0!!"))
+    .bind((int x) => some("x % 2 == 0!!"))
     .matchWithOption!(void, string,
       (Some!string _) => (string x) => writeln(x));
 
@@ -34,13 +74,15 @@ void testForOption() {
       (None!int _) => none!(int))(opt);
 
   ret.matchWithOption!(void, int,
-  (Some!int _) => (int x) => writeln("x is ", x),
+  		(Some!int _) => (int x) => writeln("x is ", x),
       (None!int _) => writeln("None!"));
 
-  opt.matchWithOption!(Option!int, int,
-      (Some!int _) => (int x) => some(x * x),
-      (None!int _) => none!(int))
-    .bind!(int, int)((int x) { writeln("x : ", x); return some(x); });
+	opt.matchWithOption!(Option!int, int,
+      (Some!int _) => (int x) => x % 2 == 0 ? some(10) : none!int,
+			(None!int _) => _)
+     .matchWithOption!(void, int,
+         (Some!int _) => writeln("Some"),
+         (None!int _) => writeln("None"));
 
   //mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
   // dfmt on
@@ -87,9 +129,56 @@ void testForBinaryTree() {
 	toString!int(ti).writeln;
 }
 
+enum codeEither = `
+type Either(T, U) =
+	| Right of T
+	| Left of U
+`;
+
+mixin(genCode(cast(TypeDeclare)DADT(codeEither).buildAST));
+
+Option!(T) isEitherRight(T, U)(Either!(T, U) arg) {
+	if ((cast(Right!(T, U))arg) !is null) {
+		T val = (cast(Right!(T, U))arg)._0;
+		return some(val);
+	} else {
+		return none!T;
+	}
+}
+
+auto then(T, U)(Option!(T) arg, U function(T) proc) {
+	static if (is(U == void)) {
+		alias R = void;
+	} else {
+		alias R = Option!U;
+	}
+
+	if ((cast(Some!T)arg) !is null) {
+		T val = (cast(Some!T)arg)._0;
+		proc(val);
+	}
+}
+
+void testForEither() {
+	Either!(int, string) funcEither(int x) {
+		if (x % 2 == 0) {
+			return right!(int, string)(x * x);
+		} else {
+			return left!(int, string)("error");
+		}
+	}
+
+	Either!(int, string) e1 = funcEither(2), e2 = funcEither(3);
+
+	e1.isEitherRight!(int, string).then((int x) => writeln(x));
+}
+
 void main() {
 	testForOption;
 	testForBinaryTree;
+	testForEither;
+
+	//genCode(cast(TypeDeclare)DADT(code).buildAST).writeln;
 }
 
 void test() {
