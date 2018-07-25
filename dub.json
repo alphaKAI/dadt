@@ -1,11 +1,11 @@
 {
 	"name": "dadt",
 	"authors": [
-		"庄司明洋"
+		"Akihiro Shoji"
 	],
-	"description": "A minimal D application.",
-	"copyright": "Copyright © 2018, 庄司明洋",
-	"license": "proprietary",
+	"description": "Algebraic Data Type For D",
+	"copyright": "Copyright (C) 2018, Akihiro Shoji",
+	"license": "MIT",
 	"dependencies": {
 		"pegged"		: "*"
 	}

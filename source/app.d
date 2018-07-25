@@ -13,9 +13,6 @@ mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
 auto bind(T, U)(Option!(T) arg, U function(T) proc) {
 	import std.traits;
 
-	//writeln("arg : ", arg);
-	//writeln("proc : ", typeid(proc));
-
 	static if (is(U == void)) {
 		alias R = void;
 	} else static if (__traits(isSame, TemplateOf!(U), Option)
@@ -24,9 +21,6 @@ auto bind(T, U)(Option!(T) arg, U function(T) proc) {
 	} else {
 		alias R = Option!U;
 	}
-
-	//writeln("R : ", typeid(R));
-	//writeln("U : ", typeid(U));
 
 	if ((cast(Some!T)arg) !is null) {
 		T val = (cast(Some!T)arg)._0;
@@ -53,7 +47,7 @@ auto bind(T, U)(Option!(T) arg, U function(T) proc) {
 			static if (is(R == None!U)) {
 				return none!U;
 			} else {
-				throw new Error("<2>Error in bind! <incompatible type was given>");
+				throw new Error("<1>Error in bind! <incompatible type was given>");
 			}
 		}
 	}
@@ -178,12 +172,6 @@ void main() {
 	testForOption;
 	testForBinaryTree;
 	testForEither;
-
-	(cast(TypeDeclare)DADT(`
-type Option(T) =
-  | Some of T
-  | None
-	[@@deriving show]`).buildAST).genCode.writeln;
 }
 
 void test() {
