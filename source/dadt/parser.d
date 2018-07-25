@@ -1,4 +1,4 @@
-module dadt.parse;
+module dadt.parser;
 import pegged.grammar;
 import std.algorithm;
 import std.format;
