@@ -5,6 +5,7 @@ enum code = `
 type Option(T) =
   | Some of T
   | None
+	[@@deriving show]
 `;
 
 mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
@@ -83,7 +84,7 @@ void testForOption() {
      .matchWithOption!(void, int,
          (Some!int _) => writeln("Some"),
          (None!int _) => writeln("None"));
-
+	ret.show_Option.writeln;
   //mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
   // dfmt on
 }
@@ -178,7 +179,11 @@ void main() {
 	testForBinaryTree;
 	testForEither;
 
-	//genCode(cast(TypeDeclare)DADT(code).buildAST).writeln;
+	(cast(TypeDeclare)DADT(`
+type Option(T) =
+  | Some of T
+  | None
+	[@@deriving show]`).buildAST).genCode.writeln;
 }
 
 void test() {

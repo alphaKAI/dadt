@@ -9,7 +9,7 @@ import std.ascii;
 
 mixin(grammar(`
 DADT:
-  TypeDeclare < "type" BaseConstructor "=" ConstructorList
+  TypeDeclare < "type" BaseConstructor "=" ConstructorList Deriving?
 
   BaseConstructor < TypeNameWithArgs / TypeNameWithoutArgs
 
@@ -35,6 +35,10 @@ DADT:
   Constructor <  "|" TypeName
   ConstructorDeclare < ConstructorWithField / Constructor
   ConstructorList < ConstructorDeclare+
+
+  Deriving < "[@@deriving" DerivingArgs "]"
+  DerivingArgs < DerivingArg ("," DerivingArg)* 
+  DerivingArg <~ !Keyword [a-zA-Z_] [a-zA-Z0-9_]*
 
   Keyword <~ "of"
   Integer <~ digit+
@@ -181,10 +185,17 @@ class ParameterList : ASTElement {
 class TypeDeclare : ASTElement {
   BaseConstructor baseConstructor;
   ConstructorList constructorList;
+  Deriving deriving;
 
   this(BaseConstructor baseConstructor, ConstructorList constructorList) {
     this.baseConstructor = baseConstructor;
     this.constructorList = constructorList;
+  }
+
+  this(BaseConstructor baseConstructor, ConstructorList constructorList, Deriving deriving) {
+    this.baseConstructor = baseConstructor;
+    this.constructorList = constructorList;
+    this.deriving = deriving;
   }
 }
 
@@ -210,8 +221,44 @@ class Constructor : ASTElement {
   }
 }
 
+enum DerivingType {
+  Show,
+  Ord,
+  Eq
+}
+
+enum DerivingMap = ["show" : DerivingType.Show, "ord" : DerivingType.Ord, "eq" : DerivingType.Eq];
+
+class DerivingArg : ASTElement {
+  DerivingType type;
+
+  this(DerivingType type) {
+    this.type = type;
+  }
+}
+
+class DerivingArgs : ASTElement {
+  DerivingArg[] args;
+
+  this(DerivingArg[] args) {
+    this.args = args;
+  }
+}
+
+class Deriving : ASTElement {
+  DerivingArgs args;
+
+  this(DerivingArgs args) {
+    this.args = args;
+  }
+}
+
 ASTElement buildAST(ParseTree p) {
-  //writeln("p.name : ", p.name);
+
+  if (!__ctfe) {
+    writeln("p.name : ", p.name);
+  }
+
   final switch (p.name) {
   case "DADT":
     auto e = p.children[0];
@@ -228,7 +275,21 @@ ASTElement buildAST(ParseTree p) {
 
     ConstructorList constructorList = cast(ConstructorList)buildAST(p.children[1]);
 
-    return new TypeDeclare(baseConstructor, constructorList);
+    if (constructorList is null) {
+      throw new Error("Error in %s!".format(p.name));
+    }
+
+    if (p.children.length == 2) {
+      return new TypeDeclare(baseConstructor, constructorList);
+    } else {
+      Deriving deriving = cast(Deriving)buildAST(p.children[2]);
+
+      if (deriving is null) {
+        throw new Error("Error in %s!".format(p.name));
+      }
+
+      return new TypeDeclare(baseConstructor, constructorList, deriving);
+    }
   case "DADT.TypeName":
     string typeName = p.matches[0];
     return new TypeName(typeName);
@@ -353,8 +414,37 @@ ASTElement buildAST(ParseTree p) {
       throw new Error("Error in %s!".format(p.name));
     }
     return new Constructor(constructorName);
-  }
+  case "DADT.Deriving":
+    DerivingArgs args = cast(DerivingArgs)buildAST(p.children[0]);
 
+    if (args is null) {
+      throw new Error("Error in %s!".format(p.name));
+    }
+
+    return new Deriving(args);
+  case "DADT.DerivingArg":
+    string k = p.matches[0].toLower;
+
+    if (k in DerivingMap) {
+      return new DerivingArg(DerivingMap[k]);
+    } else {
+      throw new Error("Unkown deriving target was given : %s".format(p.matches[0]));
+    }
+  case "DADT.DerivingArgs":
+    DerivingArg[] args;
+
+    foreach (child; p.children) {
+      DerivingArg arg = cast(DerivingArg)buildAST(child);
+
+      if (arg is null) {
+        throw new Error("Error in %s!".format(p.name));
+      }
+
+      args ~= arg;
+    }
+
+    return new DerivingArgs(args);
+  }
 }
 
 string genCode(const TypeDeclare td) {
@@ -502,6 +592,86 @@ string genCode(const TypeDeclare td) {
       match_returnType);
 
   code ~= match_code;
+
+  if (td.deriving !is null) {
+    string deriving_code;
+
+    foreach (arg; td.deriving.args.args) {
+      final switch (arg.type) with (DerivingType) {
+      case Show:
+        string show_code;
+
+        string show_header = `string show_%s%s(%s%s arg, string function(%s%s) conv = null) {`.format(interface_name,
+            interface_args_str, interface_name, args_str, interface_name, args_str);
+
+        string show_middle_header = q{
+  if (conv !is null) {
+    return conv(arg);
+  }
+  import std.string;
+  string[] interface_args = [%s];
+  string instance_arg;
+  if (interface_args.length) {
+    instance_arg = "!(" ~ interface_args.join(", ") ~ ")";
+  }
+}.format(interface_args.map!(iarg => iarg ~ ".stringof")
+            .join(", "));
+
+        string[] show_constructors;
+
+        foreach (constructor; td.constructorList.constructors) {
+          string instance_name = constructor.typeName.name;
+          string type_signature = constructor.typeName.name ~ args_str;
+          string[] field_names;
+          foreach (i, fieldType; constructor.fields) {
+            string field_name = "x._%d".format(i);
+            field_names ~= field_name;
+          }
+
+          string ret_line;
+
+          if (field_names.length) {
+            string[] field_formatters;
+            foreach (_; field_names) {
+              field_formatters ~= "%s";
+            }
+            ret_line = `return "%s" ~ instance_arg ~ "(%s)".format(%s);`.format(instance_name,
+                field_formatters.join(", "), field_names.join(", "));
+          } else {
+            ret_line = `return "%s" ~ instance_arg;`.format(instance_name);
+          }
+
+          show_constructors ~= `if ((cast(%s)arg) !is null) {
+    %s x = cast(%s)arg;`.format(type_signature,
+              type_signature, type_signature) ~ `
+
+    %s
+  }`.format(ret_line);
+
+        }
+
+        string show_footer = `
+
+  throw new Error("Invalid instance of %s!");
+}`.format(interface_name);
+
+        show_code = `
+        %s
+        %s
+        %s
+        %s`.format(show_header, show_middle_header,
+            show_constructors.join("\n"), show_footer);
+
+        deriving_code ~= show_code;
+        break;
+      case Ord:
+        break;
+      case Eq:
+        break;
+      }
+      code ~= deriving_code;
+    }
+  }
 
   return code;
 }
