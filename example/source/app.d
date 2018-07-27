@@ -6,7 +6,7 @@ enum code = `
 type Option(T) =
   | Some of T
   | None
-  [@@deriving show, ord];
+  [@@deriving show, ord, eq];
 `;
 
 mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
@@ -88,6 +88,10 @@ void testForOption() {
   assert(compare_Option(c, b) == 1);
   assert(compare_Option(a, d) == -1);
   assert(compare_Option(d, d) == 0);
+
+  assert(equal_Option(a, a) == true);
+  assert(equal_Option(a, b) == false);
+  assert(equal_Option(d, d) == true);
 }
 
 enum code1 = `
@@ -188,10 +192,10 @@ void test() {
 type Option(T) =
   | Some of T
   | None
-  [@@deriving show, ord];
+  [@@deriving show, ord, eq];
 `;
   writeln(code);
   writeln("compile to ↓");
   TypeDeclare td = cast(TypeDeclare)DADT(code).buildAST;
-  //(genCode(td)).writeln;
+  (genCode(td)).writeln;
 }
