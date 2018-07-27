@@ -6,6 +6,7 @@ import std.string;
 import std.stdio;
 import std.array;
 import std.ascii;
+import dadt.util;
 
 mixin(grammar(`
 DADT:
@@ -460,9 +461,14 @@ string genCode(const TypeDeclare td) {
     args_str = "!" ~ interface_args_str;
   }
 
-  code ~= "interface " ~ interface_name ~ interface_args_str ~ "{}\n";
+  // dfmt off
+  code ~= "interface #{interface_name}##{interface_args_str}# {}".patternReplaceWithTable([
+      "interface_name"     : interface_name,
+      "interface_args_str" : interface_args_str]);
+  // dfmt on
 
   foreach (constructor; td.constructorList.constructors) {
+    string instance_name = constructor.typeName.name;
     string[] field_names;
     string[string] field_info;
     string field_code;
@@ -488,20 +494,30 @@ string genCode(const TypeDeclare td) {
       initialize_list ~= "this.%s = %s;".format(field_name, field_name);
     }
 
-    this_code = `this(%s) {
-  %s
-}`.format(this_argument, initialize_list);
+    // dfmt off
+    this_code = `
+  this(#{this_argument}#) {
+    #{initialize_list}#
+  }`.patternReplaceWithTable([
+        "this_argument"   : this_argument,
+        "initialize_list" : initialize_list]);
 
-    code ~= "\n" ~ `class %s%s : %s%s {
-  %s
-
-  %s
-}`.format(constructor.typeName.name,
-        interface_args_str, interface_name, args_str, field_code, this_code);
+    code ~= `
+class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
+  #{field_code}#
+  #{this_code}#
+}`.patternReplaceWithTable([
+        "instance_name"      : instance_name,
+        "interface_args_str" : interface_args_str,
+        "interface_name"     : interface_name,
+        "args_str"           : args_str,
+        "field_code"         : field_code,
+        "this_code"          : this_code]);
+    // dfmt on
 
     string helper_code;
-    string helper_returnType = constructor.typeName.name ~ args_str;
-    string helper_name = constructor.typeName.name.toLower;
+    string helper_returnType = instance_name ~ args_str;
+    string helper_name = instance_name.toLower;
     string helper_typeParameters;
 
     if (interface_args.length) {
@@ -516,21 +532,32 @@ string genCode(const TypeDeclare td) {
       helper_variables ~= "_%d".format(i);
     }
 
+    // dfmt off
     helper_code = `
-%s %s%s(%s) {
-  return new %s(%s);
-}`.format(helper_returnType, helper_name, helper_typeParameters,
-        helper_arguments.join(", "), helper_returnType, helper_variables.join(", "));
+#{helper_returnType}# #{helper_name}##{helper_typeParameters}#(#{helper_arguments}#) {
+  return new #{helper_returnType}#(#{helper_variables}#);
+}
+`.patternReplaceWithTable([
+      "helper_returnType"     : helper_returnType,
+      "helper_name"           : helper_name,
+      "helper_typeParameters" : helper_typeParameters,
+      "helper_arguments"      : helper_arguments.join(", "),
+      "helper_variables"      : helper_variables.join(", ")]);
+    // dfmt on
 
     code ~= helper_code;
   }
 
   string match_returnType = "_RETURN_TYPE_OF_MATCH_WITH_%s".format(interface_name);
-  string match_header = "%s matchWith%s(%s, %s choices...)(%s%s arg) {".format(
-      match_returnType, interface_name, match_returnType,
-      interface_args.join(", ") ~ (interface_args.length > 0 ? "," : ""), interface_name, args_str);
+  // dfmt off
+  string match_header = "#{match_returnType}# matchWith#{interface_name}#(#{match_returnType}#, #{interface_args}# choices...)(#{interface_name}##{args_str}# arg) {".patternReplaceWithTable([
+      "match_returnType" : match_returnType,
+      "interface_name"   : interface_name,
+      "interface_args"   : interface_args.join(", ") ~ (interface_args.length > 0 ? "," : ""),
+      "interface_name"   : interface_name, "args_str":args_str]);
+  // dfmt on
 
-  string[] match_static_routers;
+  string match_static_routers;
 
   foreach (constructor; td.constructorList.constructors) {
     string type_signature = constructor.typeName.name ~ args_str;
@@ -540,31 +567,37 @@ string genCode(const TypeDeclare td) {
       field_names ~= field_name;
     }
 
-    match_static_routers ~= `static if (is(%s == params[0])) {`.format(type_signature) ~ `
-        %s x = cast(%s)arg;`.format(type_signature,
-        type_signature) ~ `
-        static if (is(ReturnType!(choice) == %s)) {
-          static if (is(%s == void)) {`.format(match_returnType, match_returnType) ~ `
+    // dfmt off
+    match_static_routers ~= `
+      static if (is(#{type_signature}# == params[0])) {
+        #{type_signature}# x = cast(#{type_signature}#)arg;
+
+        static if (is(ReturnType!(choice) == #{match_returnType}#)) {
+          static if (is(#{match_returnType}# == void)) {
             choice(x);
           } else {
             return choice(x);
           }
         } else {
           static if (isCallable!(ReturnType!(choice))) {
-            return cast(%s)choice(x)`.format(
-        match_returnType) ~ (field_names.length > 0
-        ? `(` ~ field_names.join(", ") ~ `)` : "()") ~ ` ;
+            return cast(#{match_returnType}#)choice(x)#{field_args}#;
           } else {
-            return cast(%s)choice(x); 
+            return cast(#{match_returnType}#)choice(x); 
           }
         }
-    }`.format(match_returnType);
+      }
+`.patternReplaceWithTable([
+  "type_signature"   : type_signature,
+  "match_returnType" : match_returnType,
+  "field_args"       : field_names.length > 0 ? `(` ~ field_names.join(", ") ~ `)` : "()"]);
+    // dfmt on
   }
 
-  string match_code = `%s
+  // dfmt off
+  string match_code = `
+#{match_header}#
   import std.traits;
-  %s delegate() otherwise = null;`.format(match_header,
-      match_returnType) ~ `
+  #{match_returnType}# delegate() otherwise = null;
 
   foreach (choice; choices) {
     alias params = Parameters!choice;
@@ -573,12 +606,12 @@ string genCode(const TypeDeclare td) {
     }
 
     if (cast(params[0])(arg) !is null) {
-    ` ~ match_static_routers.join("\n") ~ `
+      #{match_static_routers}#
     }
   }
 
   if (otherwise !is null) {
-    static if (is(%s == void)) {
+    static if (is(#{match_returnType}# == void)) {
       otherwise();
       return;
     } else {
@@ -586,39 +619,45 @@ string genCode(const TypeDeclare td) {
     }
   }
 
-  static if (!is(%s == void)) {
+  static if (!is(#{match_returnType}# == void)) {
     return null;
   }
-}`.format(match_returnType,
-      match_returnType);
-
+}
+`.patternReplaceWithTable([
+  "match_header"         : match_header,
+  "match_returnType"     : match_returnType,
+  "match_static_routers" : match_static_routers
+]);
+  // dfmt on
   code ~= match_code;
 
   if (td.deriving !is null) {
-    string deriving_code;
-
     foreach (arg; td.deriving.args.args) {
+      string deriving_code;
       final switch (arg.type) with (DerivingType) {
       case Show:
         string show_code;
 
-        string show_header = `string show_%s%s(%s%s arg, string function(%s%s) conv = null) {`.format(interface_name,
-            interface_args_str, interface_name, args_str, interface_name, args_str);
-
-        string show_middle_header = q{
-  if (conv !is null) {
+        // dfmt off
+        string show_header = `string show_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# arg, string function(#{interface_name}##{args_str}#) conv = null) {`.patternReplaceWithTable([
+          "interface_name"     : interface_name,
+          "interface_args_str" : interface_args_str,
+          "args_str"           : args_str]);
+        
+        string show_middle_header =
+`  if (conv !is null) {
     return conv(arg);
   }
   import std.string;
-  string[] interface_args = [%s];
+  string[] interface_args = [#{interface_args}#];
   string instance_arg;
   if (interface_args.length) {
     instance_arg = "!(" ~ interface_args.join(", ") ~ ")";
   }
-}.format(interface_args.map!(iarg => iarg ~ ".stringof")
-            .join(", "));
+`.patternReplaceWithTable(["interface_args" : interface_args.map!(iarg => iarg ~ ".stringof").join(", ")]);
+        // dfmt on
 
-        string[] show_constructors;
+        string show_constructors;
 
         foreach (constructor; td.constructorList.constructors) {
           string instance_name = constructor.typeName.name;
@@ -636,39 +675,51 @@ string genCode(const TypeDeclare td) {
             foreach (_; field_names) {
               field_formatters ~= "%s";
             }
-            ret_line = `return "%s" ~ instance_arg ~ "(%s)".format(%s);`.format(instance_name,
-                field_formatters.join(", "), field_names.join(", "));
+            // dfmt off
+            ret_line = `return "#{instance_name}#" ~ instance_arg ~ "(#{field_formatters}#)".format(#{field_names}#);`.patternReplaceWithTable([
+              "instance_name"    : instance_name,
+              "field_formatters" : field_formatters.join(", "),
+              "field_names"      : field_names.join(", ")]);
+            // dfmt on
           } else {
             ret_line = `return "%s" ~ instance_arg;`.format(instance_name);
           }
 
-          show_constructors ~= `if ((cast(%s)arg) !is null) {
-    %s x = cast(%s)arg;`.format(type_signature,
-              type_signature, type_signature) ~ `
+          // dfmt off
+          show_constructors ~= `
+  if ((cast(#{type_signature}#)arg) !is null) {
+    #{type_signature}# x = cast(#{type_signature}#)arg;
 
-    %s
-  }`.format(ret_line);
-
+    #{ret_line}#
+  }
+`.patternReplaceWithTable([
+  "type_signature" : type_signature,
+  "ret_line"       : ret_line]);
+          // dfmt on
         }
 
-        string show_footer = `
+        // dfmt off
+        show_code =
+`
+#{show_header}#
+#{show_middle_header}#
+#{show_constructors}#
 
-  throw new Error("Invalid instance of %s!");
-}`.format(interface_name);
-
-        show_code = `
-        %s
-        %s
-        %s
-        %s`.format(show_header, show_middle_header,
-            show_constructors.join("\n"), show_footer);
-
+  throw new Error("Invalid instance of #{interface_name}#!");
+}
+`.patternReplaceWithTable([
+  "show_header"        : show_header,
+  "show_middle_header" : show_middle_header,
+  "show_constructors"  : show_constructors,
+  "interface_name"     : interface_name
+]);
+        // dfmt on
         deriving_code ~= show_code;
         break;
       case Ord:
         break;
       case Eq:
-        break;
+        goto case Ord;
       }
       code ~= deriving_code;
     }
