@@ -632,6 +632,8 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
   code ~= match_code;
 
   if (td.deriving !is null) {
+    bool ord_is_generated = false;
+
     foreach (arg; td.deriving.args.args) {
       string deriving_code;
       final switch (arg.type) with (DerivingType) {
@@ -717,6 +719,10 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
         deriving_code ~= show_code;
         break;
       case Ord:
+        if (ord_is_generated) {
+          break;
+        }
+        ord_is_generated = true;
         string ord_helper_code;
         /*string ord_helper_header = `int int_of_%s%s(%s%s arg) {`.format(interface_name,
             interface_args_str, interface_name, args_str);
@@ -833,7 +839,31 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
         deriving_code ~= ord_code;
         break;
       case Eq:
-        goto case Ord;
+        // dfmt off
+        string eq_header = `bool equal_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# _lhs, #{interface_name}##{args_str}# _rhs) {`.patternReplaceWithTable([
+          "interface_name"     : interface_name,
+          "interface_args_str" : interface_args_str,
+          "args_str"           : args_str]);
+        string eq_body = `  return compare_#{interface_name}##{args_str}#(_lhs, _rhs) == 0;`.patternReplaceWithTable([
+          "interface_name"     : interface_name,
+          "args_str"           : args_str]);
+        string eq_footer = "}";
+        string eq_code =
+`
+#{eq_header}#
+#{eq_body}#
+#{eq_footer}#
+`.patternReplaceWithTable([
+  "eq_header" : eq_header,
+  "eq_body"   : eq_body,
+  "eq_footer" : eq_footer]);
+        deriving_code ~= eq_code;
+        // dfmt on
+        if (!ord_is_generated) {
+          goto case Ord;
+        } else {
+          break;
+        }
       }
       code ~= deriving_code;
     }
