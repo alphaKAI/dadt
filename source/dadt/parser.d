@@ -717,6 +717,120 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
         deriving_code ~= show_code;
         break;
       case Ord:
+        string ord_helper_code;
+        /*string ord_helper_header = `int int_of_%s%s(%s%s arg) {`.format(interface_name,
+            interface_args_str, interface_name, args_str);
+        */
+        // dfmt off
+        string ord_helper_header = `int int_of_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# arg) {`.patternReplaceWithTable([
+          "interface_name"     : interface_name,
+          "interface_args_str" : interface_args_str,
+          "args_str"           : args_str]);
+        // dfmt on
+
+        string ord_helper_body;
+
+        foreach (i, constructor; td.constructorList.constructors) {
+          string type_signature = constructor.typeName.name ~ args_str;
+          // dfmt off
+          ord_helper_body ~= 
+`
+  if ((cast(#{INSTANCE_TYPE}#)arg) !is null) {
+    return %d;
+  }
+`.format(i).patternReplaceWithTable(["INSTANCE_TYPE" : type_signature]);
+// dfmt on
+        }
+
+        string ord_helper_footer = `
+  throw new Error("This error never called");
+}`;
+        // dfmt off
+        ord_helper_code =
+`
+#{ord_helper_header}#
+#{ord_helper_body}#
+#{ord_helper_footer}#
+`.patternReplaceWithTable([
+  "ord_helper_header" : ord_helper_header,
+  "ord_helper_body"   : ord_helper_body,
+  "ord_helper_footer" : ord_helper_footer]);
+        // dfmt on
+        // dfmt off
+        string ord_header = `int compare_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# _lhs, #{interface_name}##{args_str}# _rhs) {`.patternReplaceWithTable([
+          "interface_name"     : interface_name,
+          "interface_args_str" : interface_args_str,
+          "args_str"           : args_str]);
+        // dfmt on
+        string ord_precomp = `
+  int lhs_id = int_of_#{interface_name}#(_lhs),
+      rhs_id = int_of_#{interface_name}#(_rhs);
+
+  if (lhs_id < rhs_id) {
+    return -1;
+  }
+  if (lhs_id > rhs_id) {
+    return 1;
+  }
+`.patternReplaceWithTable(["interface_name" : interface_name]);
+
+        string ord_compbody;
+
+        foreach (constructor; td.constructorList.constructors) {
+          string instance_name = constructor.typeName.name;
+          string type_signature = constructor.typeName.name ~ args_str;
+          string field_comps;
+
+          foreach (i, fieldType; constructor.fields) {
+            string field_name = "_%d".format(i);
+
+            field_comps ~= `
+    if (lhs.#{field_name}# < rhs.#{field_name}#) {
+      return -1;
+    }
+    if (lhs.#{field_name}# > rhs.#{field_name}#) {
+      return 1;
+    }
+  `.patternReplaceWithTable(["field_name" : field_name]);
+          }
+
+          // dfmt off
+          ord_compbody ~= `
+  if ((cast(#{type_signature}#)_lhs) !is null) {
+    #{type_signature}# lhs = cast(#{type_signature}#)_lhs,
+             rhs = cast(#{type_signature}#)_rhs;
+
+    #{field_comps}#
+
+    return 0;
+  }
+`.patternReplaceWithTable([
+  "type_signature" : type_signature,
+  "field_comps" : field_comps
+]);
+          // dfmt on
+        }
+
+        string ord_footer = `
+  throw new Error("This error never called");
+}`;
+
+        // dfmt off
+        string ord_code = `
+#{ord_helper_code}#
+#{ord_header}#
+#{ord_precomp}#
+#{ord_compbody}#
+#{ord_footer}#
+`.patternReplaceWithTable([
+  "ord_helper_code" : ord_helper_code,
+  "ord_header"      : ord_header,
+  "ord_precomp"     : ord_precomp,
+  "ord_compbody"    : ord_compbody,
+  "ord_footer"    : ord_footer
+]);
+        // dfmt on
+        deriving_code ~= ord_code;
         break;
       case Eq:
         goto case Ord;
