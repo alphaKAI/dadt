@@ -724,9 +724,6 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
         }
         ord_is_generated = true;
         string ord_helper_code;
-        /*string ord_helper_header = `int int_of_%s%s(%s%s arg) {`.format(interface_name,
-            interface_args_str, interface_name, args_str);
-        */
         // dfmt off
         string ord_helper_header = `int int_of_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# arg) {`.patternReplaceWithTable([
           "interface_name"     : interface_name,
