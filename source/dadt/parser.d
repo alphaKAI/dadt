@@ -461,14 +461,41 @@ string genCode(const TypeDeclare td) {
     args_str = "!" ~ interface_args_str;
   }
 
+  string[] enum_elements;
+  foreach (i, constructor; td.constructorList.constructors) {
+    if (i > 0) {
+      enum_elements ~= "  " ~ constructor.typeName.name;
+    } else {
+      enum_elements ~= constructor.typeName.name;
+    }
+  }
+
   // dfmt off
-  code ~= "interface #{interface_name}##{interface_args_str}# {}".patternReplaceWithTable([
+  code ~= 
+`
+enum #{interface_name}#Type {
+  #{enum_elements}#
+}
+`.patternReplaceWithTable([
+  "interface_name" : interface_name,
+  "enum_elements"  : enum_elements.join(",\n")
+]);
+  // dfmt on  
+
+  // dfmt off
+  code ~= 
+`
+interface #{interface_name}##{interface_args_str}# {
+  #{interface_name}#Type type();
+}
+`.patternReplaceWithTable([
       "interface_name"     : interface_name,
       "interface_args_str" : interface_args_str]);
   // dfmt on
 
   foreach (constructor; td.constructorList.constructors) {
-    string instance_name = constructor.typeName.name;
+    string constructor_name = constructor.typeName.name;
+
     string[] field_names;
     string[string] field_info;
     string field_code;
@@ -502,22 +529,33 @@ string genCode(const TypeDeclare td) {
         "this_argument"   : this_argument,
         "initialize_list" : initialize_list]);
 
+    string type_code = `
+  #{interface_name}#Type type() {
+    return #{interface_name}#Type.#{constructor_name}#;
+  }
+`.patternReplaceWithTable([
+  "interface_name"   : interface_name,
+  "constructor_name" : constructor_name
+]);
+
     code ~= `
-class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
+class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
   #{field_code}#
   #{this_code}#
+  #{type_code}#
 }`.patternReplaceWithTable([
-        "instance_name"      : instance_name,
+        "constructor_name"   : constructor_name,
         "interface_args_str" : interface_args_str,
         "interface_name"     : interface_name,
         "args_str"           : args_str,
         "field_code"         : field_code,
-        "this_code"          : this_code]);
+        "this_code"          : this_code,
+        "type_code"          : type_code]);
     // dfmt on
 
     string helper_code;
-    string helper_returnType = instance_name ~ args_str;
-    string helper_name = instance_name.toLower;
+    string helper_returnType = constructor_name ~ args_str;
+    string helper_name = constructor_name.toLower;
     string helper_typeParameters;
 
     if (interface_args.length) {
@@ -652,17 +690,18 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
   }
   import std.string;
   string[] interface_args = [#{interface_args}#];
-  string instance_arg;
+  string constructor_arg;
   if (interface_args.length) {
-    instance_arg = "!(" ~ interface_args.join(", ") ~ ")";
+    constructor_arg = "!(" ~ interface_args.join(", ") ~ ")";
   }
 `.patternReplaceWithTable(["interface_args" : interface_args.map!(iarg => iarg ~ ".stringof").join(", ")]);
         // dfmt on
 
-        string show_constructors;
+        string show_constructors = `
+  final switch (arg.type) {`;
 
         foreach (constructor; td.constructorList.constructors) {
-          string instance_name = constructor.typeName.name;
+          string constructor_name = constructor.typeName.name;
           string type_signature = constructor.typeName.name ~ args_str;
           string[] field_names;
           foreach (i, fieldType; constructor.fields) {
@@ -678,42 +717,42 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
               field_formatters ~= "%s";
             }
             // dfmt off
-            ret_line = `return "#{instance_name}#" ~ instance_arg ~ "(#{field_formatters}#)".format(#{field_names}#);`.patternReplaceWithTable([
-              "instance_name"    : instance_name,
+            ret_line = `return "#{constructor_name}#" ~ constructor_arg ~ "(#{field_formatters}#)".format(#{field_names}#);`.patternReplaceWithTable([
+              "constructor_name"    : constructor_name,
               "field_formatters" : field_formatters.join(", "),
               "field_names"      : field_names.join(", ")]);
             // dfmt on
           } else {
-            ret_line = `return "%s" ~ instance_arg;`.format(instance_name);
+            ret_line = `return "%s" ~ constructor_arg;`.format(constructor_name);
           }
 
           // dfmt off
           show_constructors ~= `
-  if ((cast(#{type_signature}#)arg) !is null) {
-    #{type_signature}# x = cast(#{type_signature}#)arg;
+    case #{interface_name}#Type.#{constructor_name}#:
+      #{type_signature}# x = cast(#{type_signature}#)arg;
 
-    #{ret_line}#
-  }
-`.patternReplaceWithTable([
-  "type_signature" : type_signature,
-  "ret_line"       : ret_line]);
+      #{ret_line}#`.patternReplaceWithTable([
+  "interface_name"   : interface_name,
+  "constructor_name" : constructor_name,
+  "type_signature"   : type_signature,
+  "ret_line"         : ret_line]);
           // dfmt on
         }
 
+        string show_footer = `  }`;
         // dfmt off
         show_code =
 `
 #{show_header}#
 #{show_middle_header}#
 #{show_constructors}#
-
-  throw new Error("Invalid instance of #{interface_name}#!");
+#{show_footer}#
 }
 `.patternReplaceWithTable([
   "show_header"        : show_header,
   "show_middle_header" : show_middle_header,
   "show_constructors"  : show_constructors,
-  "interface_name"     : interface_name
+  "show_footer"        : show_footer
 ]);
         // dfmt on
         deriving_code ~= show_code;
@@ -723,42 +762,6 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
           break;
         }
         ord_is_generated = true;
-        string ord_helper_code;
-        // dfmt off
-        string ord_helper_header = `int int_of_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# arg) {`.patternReplaceWithTable([
-          "interface_name"     : interface_name,
-          "interface_args_str" : interface_args_str,
-          "args_str"           : args_str]);
-        // dfmt on
-
-        string ord_helper_body;
-
-        foreach (i, constructor; td.constructorList.constructors) {
-          string type_signature = constructor.typeName.name ~ args_str;
-          // dfmt off
-          ord_helper_body ~= 
-`
-  if ((cast(#{INSTANCE_TYPE}#)arg) !is null) {
-    return %d;
-  }
-`.format(i).patternReplaceWithTable(["INSTANCE_TYPE" : type_signature]);
-// dfmt on
-        }
-
-        string ord_helper_footer = `
-  throw new Error("This error never called");
-}`;
-        // dfmt off
-        ord_helper_code =
-`
-#{ord_helper_header}#
-#{ord_helper_body}#
-#{ord_helper_footer}#
-`.patternReplaceWithTable([
-  "ord_helper_header" : ord_helper_header,
-  "ord_helper_body"   : ord_helper_body,
-  "ord_helper_footer" : ord_helper_footer]);
-        // dfmt on
         // dfmt off
         string ord_header = `int compare_#{interface_name}##{interface_args_str}#(#{interface_name}##{args_str}# _lhs, #{interface_name}##{args_str}# _rhs) {`.patternReplaceWithTable([
           "interface_name"     : interface_name,
@@ -766,21 +769,22 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
           "args_str"           : args_str]);
         // dfmt on
         string ord_precomp = `
-  int lhs_id = int_of_#{interface_name}#(_lhs),
-      rhs_id = int_of_#{interface_name}#(_rhs);
+  #{interface_name}#Type lhs_type = _lhs.type,
+      rhs_type = _rhs.type;
 
-  if (lhs_id < rhs_id) {
+  if (lhs_type < rhs_type) {
     return -1;
   }
-  if (lhs_id > rhs_id) {
+  if (lhs_type > rhs_type) {
     return 1;
   }
 `.patternReplaceWithTable(["interface_name" : interface_name]);
 
-        string ord_compbody;
+        string ord_compbody = `
+  final switch (lhs_type) {`;
 
         foreach (constructor; td.constructorList.constructors) {
-          string instance_name = constructor.typeName.name;
+          string constructor_name = constructor.typeName.name;
           string type_signature = constructor.typeName.name ~ args_str;
           string field_comps;
 
@@ -788,45 +792,40 @@ class #{instance_name}##{interface_args_str}# : #{interface_name}##{args_str}# {
             string field_name = "_%d".format(i);
 
             field_comps ~= `
-    if (lhs.#{field_name}# < rhs.#{field_name}#) {
-      return -1;
-    }
-    if (lhs.#{field_name}# > rhs.#{field_name}#) {
-      return 1;
-    }
-  `.patternReplaceWithTable(["field_name" : field_name]);
+      if (lhs.#{field_name}# < rhs.#{field_name}#) {
+        return -1;
+      }
+      if (lhs.#{field_name}# > rhs.#{field_name}#) {
+        return 1;
+      }`.patternReplaceWithTable(["field_name" : field_name]);
           }
 
           // dfmt off
           ord_compbody ~= `
-  if ((cast(#{type_signature}#)_lhs) !is null) {
-    #{type_signature}# lhs = cast(#{type_signature}#)_lhs,
-             rhs = cast(#{type_signature}#)_rhs;
+    case #{interface_name}#Type.#{constructor_name}#:
+      #{type_signature}# lhs = cast(#{type_signature}#)_lhs,
+              rhs = cast(#{type_signature}#)_rhs;
 
-    #{field_comps}#
+      #{field_comps}#
 
-    return 0;
-  }
-`.patternReplaceWithTable([
-  "type_signature" : type_signature,
-  "field_comps" : field_comps
+      return 0;`.patternReplaceWithTable([
+  "interface_name"   : interface_name,
+  "constructor_name" : constructor_name,
+  "type_signature"   : type_signature,
+  "field_comps"      : field_comps
 ]);
           // dfmt on
         }
 
-        string ord_footer = `
-  throw new Error("This error never called");
+        string ord_footer = `  }
 }`;
-
         // dfmt off
         string ord_code = `
-#{ord_helper_code}#
 #{ord_header}#
 #{ord_precomp}#
 #{ord_compbody}#
 #{ord_footer}#
 `.patternReplaceWithTable([
-  "ord_helper_code" : ord_helper_code,
   "ord_header"      : ord_header,
   "ord_precomp"     : ord_precomp,
   "ord_compbody"    : ord_compbody,
