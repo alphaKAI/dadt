@@ -8,5 +8,6 @@
 	"license": "MIT",
 	"dependencies": {
 		"pegged"		: "*"
-	}
+	},
+	"targetType": "sourceLibrary"
 }
