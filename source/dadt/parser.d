@@ -16,10 +16,12 @@ DADT:
 
   TypeName <~ !Keyword [A-Z_] [a-zA-Z0-9_]*
 
-  Field < FieldOfArray / FieldWithArgs / FieldName
+  Field < FieldOfDelegate / FieldOfFunction / FieldOfArray / FieldWithArgs / FieldName
   FieldArgs < "()" / :"(" Field ("," Field)* :")"
   FieldWithArgs < FieldName "!" FieldArgs
   FieldOfArray < (FieldWithArgs / FieldName) ArrayBracket+
+  FieldOfDelegate < "[" Field ("->" Field)+ "]"
+  FieldOfFunction < "<" Field ("->" Field)+ ">"
   FieldName <~ !Keyword [a-zA-Z_] [a-zA-Z0-9_]*
 
   ArrayBracket < UnsizedBracket / SizedBracket
@@ -180,6 +182,42 @@ class FieldOfArray : Field {
   }
 }
 
+class FieldOfDelegate : Field {
+  Field retType;
+  Field[] args;
+
+  this(Field retType, Field[] args) {
+    this.retType = retType;
+    this.args = args;
+  }
+
+  override const string typeString() {
+    string args_str = this.args.map!(arg => arg.typeString()).join(", ");
+    if (args_str == "void") {
+      args_str = "";
+    }
+    return "%s delegate(%s)".format(this.retType.typeString(), args_str);
+  }
+}
+
+class FieldOfFunction : Field {
+  Field retType;
+  Field[] args;
+
+  this(Field retType, Field[] args) {
+    this.retType = retType;
+    this.args = args;
+  }
+
+  override const string typeString() {
+    string args_str = this.args.map!(arg => arg.typeString()).join(", ");
+    if (args_str == "void") {
+      args_str = "";
+    }
+    return "%s function(%s)".format(this.retType.typeString(), args_str);
+  }
+}
+
 class ParameterList : ASTElement {
   TypeName[] parameters;
 
@@ -307,11 +345,9 @@ class Deriving : ASTElement {
 }
 
 ASTElement buildAST(ParseTree p) {
-  /*
   if (!__ctfe) {
     writeln("p.name : ", p.name);
   }
-  */
 
   final switch (p.name) {
   case "DADT":
@@ -418,6 +454,28 @@ ASTElement buildAST(ParseTree p) {
     return new SizedBracket(size);
   case "DADT.UnsizedBracket":
     return new UnsizedBracket;
+  case "DADT.FieldOfDelegate":
+    Field[] fields;
+    foreach (child; p.children) {
+      Field field = cast(Field)buildAST(child);
+      if (field is null) {
+        throw new Error("Error in %s!".format(p.name));
+      }
+      fields ~= field;
+    }
+    Field retType = fields[$ - 1];
+    return new FieldOfDelegate(retType, fields[0 .. $ - 1]);
+  case "DADT.FieldOfFunction":
+    Field[] fields;
+    foreach (child; p.children) {
+      Field field = cast(Field)buildAST(child);
+      if (field is null) {
+        throw new Error("Error in %s!".format(p.name));
+      }
+      fields ~= field;
+    }
+    Field retType = fields[$ - 1];
+    return new FieldOfFunction(retType, fields[0 .. $ - 1]);
   case "DADT.FieldName":
     string fieldName = p.matches[0];
     return new FieldName(fieldName);
