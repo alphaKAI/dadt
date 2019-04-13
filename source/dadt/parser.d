@@ -814,7 +814,7 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
           string[] field_names;
           if (constructor.type == ConstructorType.Record) {
             foreach (field; constructor.record.fields) {
-              field_names ~= field.getFieldName();
+              field_names ~= "x." ~ field.getFieldName();
             }
           } else {
             foreach (i, fieldType; constructor.fields) {
