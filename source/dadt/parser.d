@@ -15,7 +15,7 @@ DADT:
   BaseConstructor < TypeNameWithArgs / TypeNameWithoutArgs
 
   TypeName <~ !Keyword [A-Z_] [a-zA-Z0-9_]*
-  
+
   Field < FieldOfArray / FieldWithArgs / FieldName
   FieldArgs < "()" / :"(" Field ("," Field)* :")"
   FieldWithArgs < FieldName "!" FieldArgs
@@ -32,13 +32,18 @@ DADT:
   TypeNameWithArgs < TypeName ParameterList
   ParameterList < "()" / :"(" TypeName ("," TypeName)* :")"
 
-  ConstructorWithField < "|" TypeName "of" Field ("*" Field)*
-  Constructor <  "|" TypeName
-  ConstructorDeclare < ConstructorWithField / Constructor
+  RecordField < FieldName ":" Field
+  RecordFields < (RecordField ";"?)+
+  Record < "{" RecordFields "}"
+
+  ConstructorWithRecord< "|"? TypeName "of" Record
+  ConstructorWithField < "|"? TypeName "of" Field ("*" Field)*
+  Constructor <  "|"? TypeName
+  ConstructorDeclare < ConstructorWithRecord / ConstructorWithField / Constructor
   ConstructorList < ConstructorDeclare+
 
   Deriving < "[@@deriving" DerivingArgs "]"
-  DerivingArgs < DerivingArg ("," DerivingArg)* 
+  DerivingArgs < DerivingArg ("," DerivingArg)*
   DerivingArg <~ !Keyword [a-zA-Z_] [a-zA-Z0-9_]*
 
   Keyword <~ "of"
@@ -208,17 +213,62 @@ class ConstructorList : ASTElement {
   }
 }
 
+class RecordField : ASTElement {
+  FieldName name;
+  Field field;
+
+  this(FieldName name, Field field) {
+    this.name = name;
+    this.field = field;
+  }
+
+  string getFieldTypeString() const {
+    return this.field.typeString();
+  }
+
+  string getFieldName() const {
+    return this.name.fieldName;
+  }
+}
+
+class RecordFields : ASTElement {
+  RecordField[] fields;
+  this(RecordField[] fields) {
+    this.fields = fields;
+  }
+}
+
+enum ConstructorType {
+  Single,
+  Fields,
+  Record
+}
+
 class Constructor : ASTElement {
   TypeName typeName;
   Field[] fields;
+  RecordFields record;
+  ConstructorType type;
 
   this(TypeName typeName) {
     this.typeName = typeName;
+    this.type = ConstructorType.Single;
   }
 
   this(TypeName typeName, Field[] fields) {
     this.typeName = typeName;
     this.fields = fields;
+    this.type = ConstructorType.Fields;
+  }
+
+  this(TypeName typeName, RecordFields record) {
+    this.typeName = typeName;
+    this.record = record;
+    this.type = ConstructorType.Record;
+  }
+
+  string getTypeName() const {
+    return this.typeName.name;
   }
 }
 
@@ -228,7 +278,9 @@ enum DerivingType {
   Eq
 }
 
-enum DerivingMap = ["show" : DerivingType.Show, "ord" : DerivingType.Ord, "eq" : DerivingType.Eq];
+enum DerivingMap = [
+    "show" : DerivingType.Show, "ord" : DerivingType.Ord, "eq" : DerivingType.Eq
+  ];
 
 class DerivingArg : ASTElement {
   DerivingType type;
@@ -395,6 +447,40 @@ ASTElement buildAST(ParseTree p) {
   case "DADT.ConstructorDeclare":
     auto e = p.children[0];
     return buildAST(e);
+  case "DADT.RecordField":
+    FieldName name = cast(FieldName)buildAST(p.children[0]);
+    if (name is null) {
+      throw new Error("Error in %s!".format(p.name));
+    }
+    Field field = cast(Field)buildAST(p.children[1]);
+    if (field is null) {
+      throw new Error("Error in %s!".format(p.name));
+    }
+
+    return new RecordField(name, field);
+  case "DADT.RecordFields":
+    RecordField[] fields;
+    foreach (child; p.children) {
+      RecordField field = cast(RecordField)buildAST(child);
+      if (field is null) {
+        throw new Error("Error in %s!".format(p.name));
+      }
+      fields ~= field;
+    }
+    return new RecordFields(fields);
+  case "DADT.Record":
+    return buildAST(p.children[0]);
+  case "DADT.ConstructorWithRecord":
+    TypeName constructorName = cast(TypeName)buildAST(p.children[0]);
+    if (constructorName is null) {
+      throw new Error("Error in %s!".format(p.name));
+    }
+    // RecordFields
+    RecordFields record = cast(RecordFields)buildAST(p.children[1]);
+    if (record is null) {
+      throw new Error("Error in %s!".format(p.name));
+    }
+    return new Constructor(constructorName, record);
   case "DADT.ConstructorWithField":
     TypeName constructorName = cast(TypeName)buildAST(p.children[0]);
     if (constructorName is null) {
@@ -464,14 +550,14 @@ string genCode(const TypeDeclare td) {
   string[] enum_elements;
   foreach (i, constructor; td.constructorList.constructors) {
     if (i > 0) {
-      enum_elements ~= "  " ~ constructor.typeName.name;
+      enum_elements ~= "  " ~ constructor.getTypeName();
     } else {
-      enum_elements ~= constructor.typeName.name;
+      enum_elements ~= constructor.getTypeName();
     }
   }
 
   // dfmt off
-  code ~= 
+  code ~=
 `
 enum #{interface_name}#Type {
   #{enum_elements}#
@@ -480,10 +566,10 @@ enum #{interface_name}#Type {
   "interface_name" : interface_name,
   "enum_elements"  : enum_elements.join(",\n")
 ]);
-  // dfmt on  
+  // dfmt on
 
   // dfmt off
-  code ~= 
+  code ~=
 `
 interface #{interface_name}##{interface_args_str}# {
   #{interface_name}#Type type();
@@ -494,16 +580,25 @@ interface #{interface_name}##{interface_args_str}# {
   // dfmt on
 
   foreach (constructor; td.constructorList.constructors) {
-    string constructor_name = constructor.typeName.name;
+    string constructor_name = constructor.getTypeName();
 
     string[] field_names;
     string[string] field_info;
     string field_code;
     string[] field_type_and_names;
-    foreach (i, fieldType; constructor.fields) {
-      string field_name = "_%d".format(i);
-      field_names ~= field_name;
-      field_info[field_name] = fieldType.typeString();
+
+    if (constructor.type == ConstructorType.Record) {
+      foreach (field; constructor.record.fields) {
+        string field_name = field.getFieldName();
+        field_names ~= field_name;
+        field_info[field_name] = field.getFieldTypeString();
+      }
+    } else {
+      foreach (i, fieldType; constructor.fields) {
+        string field_name = "_%d".format(i);
+        field_names ~= field_name;
+        field_info[field_name] = fieldType.typeString();
+      }
     }
 
     foreach (field_name; field_names) {
@@ -565,9 +660,16 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
     string[] helper_arguments;
     string[] helper_variables;
 
-    foreach (i, field; constructor.fields) {
-      helper_arguments ~= "%s _%d".format(field.typeString(), i);
-      helper_variables ~= "_%d".format(i);
+    if (constructor.type == ConstructorType.Record) {
+      foreach (field; constructor.record.fields) {
+        helper_arguments ~= "%s %s".format(field.getFieldTypeString(), field.getFieldName());
+        helper_variables ~= "%s".format(field.getFieldName());
+      }
+    } else {
+      foreach (i, field; constructor.fields) {
+        helper_arguments ~= "%s _%d".format(field.typeString(), i);
+        helper_variables ~= "_%d".format(i);
+      }
     }
 
     // dfmt off
@@ -598,11 +700,17 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
   string match_static_routers;
 
   foreach (constructor; td.constructorList.constructors) {
-    string type_signature = constructor.typeName.name ~ args_str;
+    string type_signature = constructor.getTypeName() ~ args_str;
     string[] field_names;
-    foreach (i, fieldType; constructor.fields) {
-      string field_name = "x._%d".format(i);
-      field_names ~= field_name;
+    if (constructor.type == ConstructorType.Record) {
+      foreach (field; constructor.record.fields) {
+        field_names ~= field.getFieldName();
+      }
+    } else {
+      foreach (i, fieldType; constructor.fields) {
+        string field_name = "x._%d".format(i);
+        field_names ~= field_name;
+      }
     }
 
     // dfmt off
@@ -620,7 +728,7 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
           static if (isCallable!(ReturnType!(choice))) {
             return cast(#{match_returnType}#)choice(x)#{field_args}#;
           } else {
-            return cast(#{match_returnType}#)choice(x); 
+            return cast(#{match_returnType}#)choice(x);
           }
         }
       }
@@ -683,7 +791,7 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
           "interface_name"     : interface_name,
           "interface_args_str" : interface_args_str,
           "args_str"           : args_str]);
-        
+
         string show_middle_header =
 `  if (conv !is null) {
     return conv(arg);
@@ -701,12 +809,18 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
   final switch (arg.type) {`;
 
         foreach (constructor; td.constructorList.constructors) {
-          string constructor_name = constructor.typeName.name;
-          string type_signature = constructor.typeName.name ~ args_str;
+          string constructor_name = constructor.getTypeName();
+          string type_signature = constructor.getTypeName() ~ args_str;
           string[] field_names;
-          foreach (i, fieldType; constructor.fields) {
-            string field_name = "x._%d".format(i);
-            field_names ~= field_name;
+          if (constructor.type == ConstructorType.Record) {
+            foreach (field; constructor.record.fields) {
+              field_names ~= field.getFieldName();
+            }
+          } else {
+            foreach (i, fieldType; constructor.fields) {
+              string field_name = "x._%d".format(i);
+              field_names ~= field_name;
+            }
           }
 
           string ret_line;
@@ -778,26 +892,46 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
   if (lhs_type > rhs_type) {
     return 1;
   }
-`.patternReplaceWithTable(["interface_name" : interface_name]);
+`.patternReplaceWithTable([
+            "interface_name": interface_name
+            ]);
 
         string ord_compbody = `
   final switch (lhs_type) {`;
 
         foreach (constructor; td.constructorList.constructors) {
-          string constructor_name = constructor.typeName.name;
-          string type_signature = constructor.typeName.name ~ args_str;
+          string constructor_name = constructor.getTypeName();
+          string type_signature = constructor.getTypeName() ~ args_str;
           string field_comps;
 
-          foreach (i, fieldType; constructor.fields) {
-            string field_name = "_%d".format(i);
+          if (constructor.type == ConstructorType.Record) {
+            foreach (field; constructor.record.fields) {
+              string field_name = field.getFieldName();
 
-            field_comps ~= `
+              field_comps ~= `
       if (lhs.#{field_name}# < rhs.#{field_name}#) {
         return -1;
       }
       if (lhs.#{field_name}# > rhs.#{field_name}#) {
         return 1;
-      }`.patternReplaceWithTable(["field_name" : field_name]);
+      }`.patternReplaceWithTable([
+                  "field_name": field_name
+                  ]);
+            }
+          } else {
+            foreach (i, fieldType; constructor.fields) {
+              string field_name = "_%d".format(i);
+
+              field_comps ~= `
+      if (lhs.#{field_name}# < rhs.#{field_name}#) {
+        return -1;
+      }
+      if (lhs.#{field_name}# > rhs.#{field_name}#) {
+        return 1;
+      }`.patternReplaceWithTable([
+                  "field_name": field_name
+                  ]);
+            }
           }
 
           // dfmt off
@@ -866,4 +1000,10 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
   }
 
   return code;
+}
+
+string genCodeFromSource(string source) {
+  auto ast = DADT(source);
+  TypeDeclare td = cast(TypeDeclare)buildAST(ast);
+  return genCode(td);
 }

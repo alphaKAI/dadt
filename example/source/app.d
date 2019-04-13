@@ -9,7 +9,7 @@ type Option(T) =
   [@@deriving show, ord, eq];
 `;
 
-mixin(genCode(cast(TypeDeclare)DADT(code).buildAST));
+mixin(genCodeFromSource(code));
 
 auto bind(T, U)(Option!(T) arg, U function(T) proc) {
   import std.traits;
