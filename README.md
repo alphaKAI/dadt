@@ -11,12 +11,12 @@ Parsing ADT declare expression and generate D code in compile time.
 ```d
 import dadt.parse;
 
-enum option_code = `
+enum OptionDefinition = `
 type Option(T) =
   | Some of T
   | None`;
 
-mixin(genCode(cast(TypeDeclare)DADT(option_code).buildAST));
+mixin(genCodeFromSource(OptionDefinition));
 /*
   genCode will generate automatically:
     - interface Option(T) {}
@@ -121,108 +121,39 @@ void testForOption() {
 ### Binary Tree
 
 ```d
-enum binaryTree_code = `
+enum BinaryTreeDefinition = `
 type Tree(T) =
   | Node of Tree!(T) * Tree!(T)
   | Leaf of T
 `;
 
-mixin(genCode(cast(TypeDeclare)DADT(binaryTree_code).buildAST));
-
-string indent(size_t n) {
-  string ret;
-  foreach (i; 0 .. n) {
-    if (i % 2) {
-      ret ~= "|   ";
-    } else {
-      ret ~= "||  ";
-    }
-  }
-  return ret;
-}
-
-string toString(T)(Tree!T tree, size_t depth = 0) {
-  import std.string;
-
-  string indent_str = indent(depth);
-  // dfmt off
-  return tree.matchWithTree!(string, T,
-      (Node!(int) _) => (Tree!int l, Tree!int r) => `
-%s|---<left>%s
-%s|
-%s|---<right>%s`.format(indent_str, toString!(T)(l, depth + 1),
-                        indent_str,
-                        indent_str, toString!(T)(r, depth + 1)),
-      (Leaf!(int) _) => (int v) => "%s".format(v));
-  // dfmt on
-}
-
-void testForBinaryTree() {
-  Tree!int ti = node(node(leaf(1), leaf(2)), node(leaf(3), leaf(4)));
-  toString!int(ti).writeln;
-}
+mixin(genCodeFromSource(BinaryTreeDefinition));
 ```
 
 ### Either
 
 ```d
-enum codeEither = `
+enum EitherDefinition = `
 type Either(T, U) =
   | Right of T
   | Left of U
 `;
 
-mixin(genCode(cast(TypeDeclare)DADT(codeEither).buildAST));
-
-Option!(T) isEitherRight(T, U)(Either!(T, U) arg) {
-  if ((cast(Right!(T, U))arg) !is null) {
-    T val = (cast(Right!(T, U))arg)._0;
-    return some(val);
-  } else {
-    return none!T;
-  }
-}
-
-auto then(T, U)(Option!(T) arg, U function(T) proc) {
-  static if (is(U == void)) {
-    alias R = void;
-  } else {
-    alias R = Option!U;
-  }
-
-  if ((cast(Some!T)arg) !is null) {
-    T val = (cast(Some!T)arg)._0;
-    proc(val);
-  }
-}
-
-void testForEither() {
-  Either!(int, string) funcEither(int x) {
-    if (x % 2 == 0) {
-      return right!(int, string)(x * x);
-    } else {
-      return left!(int, string)("error");
-    }
-  }
-
-  Either!(int, string) e1 = funcEither(2), e2 = funcEither(3);
-
-  e1.isEitherRight!(int, string).then((int x) => writeln(x));
-}
+mixin(genCodeFromSource(EitherDefinition));
 ```
 
 ### Deriving show
 You can use `deriving` keyword.  
 
 ```d
-enum option_code = `
+enum OptionDefinition = `
 type Option(T) =
   | Some of T
   | None
   [@@deriving show]
 `;
 
-mixin(genCode(cast(TypeDeclare)DADT(option_code).buildAST));
+mixin(genCodeFromSource(OptionDefinition));
 // genCode will generate...
     - interface Option(T) {}
     - class Some(T) : Option!(T) {
@@ -263,11 +194,13 @@ DADT:
   BaseConstructor < TypeNameWithArgs / TypeNameWithoutArgs
 
   TypeName <~ !Keyword [A-Z_] [a-zA-Z0-9_]*
-  
-  Field < FieldOfArray / FieldWithArgs / FieldName
+
+  Field < FieldOfDelegate / FieldOfFunction / FieldOfArray / FieldWithArgs / FieldName
   FieldArgs < "()" / :"(" Field ("," Field)* :")"
   FieldWithArgs < FieldName "!" FieldArgs
   FieldOfArray < (FieldWithArgs / FieldName) ArrayBracket+
+  FieldOfDelegate < "[" Field ("->" Field)+ "]"
+  FieldOfFunction < "<" Field ("->" Field)+ ">"
   FieldName <~ !Keyword [a-zA-Z_] [a-zA-Z0-9_]*
 
   ArrayBracket < UnsizedBracket / SizedBracket
@@ -280,20 +213,106 @@ DADT:
   TypeNameWithArgs < TypeName ParameterList
   ParameterList < "()" / :"(" TypeName ("," TypeName)* :")"
 
-  ConstructorWithField < "|" TypeName "of" Field ("*" Field)*
-  Constructor <  "|" TypeName
-  ConstructorDeclare < ConstructorWithField / Constructor
+  RecordField < FieldName ":" Field
+  RecordFields < (RecordField ";"?)+
+  Record < "{" RecordFields "}"
+
+  ConstructorWithRecord< "|"? TypeName "of" Record
+  ConstructorWithField < "|"? TypeName "of" Field ("*" Field)*
+  Constructor <  "|"? TypeName
+  ConstructorDeclare < ConstructorWithRecord / ConstructorWithField / Constructor
   ConstructorList < ConstructorDeclare+
 
   Deriving < "[@@deriving" DerivingArgs "]"
-  DerivingArgs < DerivingArg ("," DerivingArg)* 
+  DerivingArgs < DerivingArg ("," DerivingArg)*
   DerivingArg <~ !Keyword [a-zA-Z_] [a-zA-Z0-9_]*
 
   Keyword <~ "of"
   Integer <~ digit+
+
+```
+
+## Advanced Example
+
+You can use pattern matching in D with [DPMATCH](https://github.com/alphaKAI/dpmatch).  
+
+### Option
+```d
+import std.stdio;
+import dpmatch;
+import dadt;
+
+mixin(genCodeFromSource(`
+type Option(T) =
+| Some of T
+| None
+[@@deriving show, eq]
+`));
+
+import std.traits;
+
+Option!U opt_map(F, T = Parameters!F[0], U = ReturnType!F)(Option!T v_opt, F f)
+    if (isCallable!F && arity!F == 1) {
+  mixin(patternMatchADTReturn!(v_opt, OptionType, q{
+    | Some (x) -> <{ return some(f(x)); }>
+    | None -> <{ return none!T(); }>
+  }));
+}
+
+Option!U opt_bind(F, T = Parameters!F[0], RET = ReturnType!F, U = TemplateArgsOf!RET[0])(
+    Option!T v_opt, F f) if (isCallable!F && arity!F == 1) {
+  mixin(patternMatchADTReturn!(v_opt, OptionType, q{
+    | Some (x) -> <{ return f(x); }>
+    | None -> <{ return none!U; }>
+  }));
+}
+
+T opt_default(T)(Option!T v_opt, T _default) {
+  mixin(patternMatchADTReturn!(v_opt, OptionType, q{
+    | Some (x) -> <{ return x; }>
+    | None -> <{ return _default; }>
+  }));
+}
+
+void opt_may(F, T = Parameters!F[0])(Option!T v_opt, F f)
+    if (isCallable!F && arity!F == 1) {
+  mixin(patternMatchADTReturn!(v_opt, OptionType, q{
+    | Some (x) -> <{ f(x); }>
+    | None -> <{ }>
+  }));
+}
+
+void main() {
+  writeln("opt_default(some(10), 0): ", opt_default(some(10), 0));
+  writeln("opt_default(none!int, 0): ", opt_default(none!int, 0));
+
+  Option!int v = some(100);
+  mixin(patternMatchADTBind!(v, OptionType, q{
+    | Some (x) -> <{ return x; }>
+    | None -> <{ return 200; }>
+  }, "ret"));
+
+  writeln(ret);
+
+  v = none!int();
+  mixin(patternMatchADT!(v, OptionType, q{
+    | Some (x) -> <{ writeln("Some with ", x); }>
+    | None -> <{ writeln("None"); }>
+  }));
+
+  int i1 = 10;
+  int i2 = 0;
+  Option!int opt_ans = (i2 == 0 ? none!int : some(i2)).opt_map((int d) => i1 / d);
+  writeln(show_Option(opt_ans)); // None!(int)
+
+  i2 = 2;
+
+  opt_ans = (i2 == 0 ? none!int : some(i2)).opt_map((int d) => i1 / d);
+  writeln(show_Option(opt_ans)); // Some!(int)(5)
+}
 ```
 
 ## LICENSE
 DADT is released under the MIT License.  
 Please see `LICENSE` for details.  
-Copyright (C) 2018 Akihiro Shoji
+Copyright (C) 2018-2019 Akihiro Shoji
