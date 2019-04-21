@@ -710,6 +710,7 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
 
     string helper_code;
     string helper_returnType = constructor_name ~ args_str;
+    string interface_returnType = interface_name ~ args_str;
     string helper_name = constructor_name.toLower;
     string helper_typeParameters;
 
@@ -734,11 +735,12 @@ class #{constructor_name}##{interface_args_str}# : #{interface_name}##{args_str}
 
     // dfmt off
     helper_code = `
-#{helper_returnType}# #{helper_name}##{helper_typeParameters}#(#{helper_arguments}#) {
+#{interface_returnType}# #{helper_name}##{helper_typeParameters}#(#{helper_arguments}#) {
   return new #{helper_returnType}#(#{helper_variables}#);
 }
 `.patternReplaceWithTable([
       "helper_returnType"     : helper_returnType,
+      "interface_returnType"  : interface_returnType,
       "helper_name"           : helper_name,
       "helper_typeParameters" : helper_typeParameters,
       "helper_arguments"      : helper_arguments.join(", "),
